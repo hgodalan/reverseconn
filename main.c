@@ -14,7 +14,8 @@ int webConnection()
     if (webConn == -1)
     {
         perror("Error creating webConn socket");
-        exit(EXIT_FAILURE);
+        // exit(EXIT_FAILURE);
+        return -1;
     }
 
     struct sockaddr_in webServerAddr;
@@ -33,8 +34,44 @@ int webConnection()
     return webConn;
 }
 
+bool testWebConnection()
+{
+    int webConn = webConnection();
+    if (webConn == -1)
+    {
+        return false;
+    }
+
+    char *request = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+    if (send(webConn, request, strlen(request), 0) == -1)
+    {
+        perror("Error sending request to web server");
+        return false;
+    }
+
+    char buffer[1024];
+    int len = recv(webConn, buffer, sizeof(buffer) - 1, 0);
+    if (len == -1)
+    {
+        perror("Error receiving response from web server");
+        return false;
+    }
+
+    buffer[len] = '\0';
+    printf("Received response from web server: %s\n", buffer);
+
+    close(webConn);
+    return true;
+}
+
 int main()
 {
+    if (!testWebConnection())
+    {
+        printf("Error connecting to web server\n");
+        exit(EXIT_FAILURE);
+    }
+
     int conn = socket(AF_INET, SOCK_STREAM, 0);
     if (conn == -1)
     {
@@ -97,7 +134,6 @@ int main()
                     printf("Connection closed by server\n");
                     exit(EXIT_SUCCESS);
                 }
-
                 printf("Received %d bytes from server\n", len);
 
                 int webConn = webConnection();
@@ -106,7 +142,6 @@ int main()
                     printf("Error connecting to web server\n");
                     continue;
                 }
-
                 printf("Connected to web server\n");
 
                 if (send(webConn, buffer, len, 0) == -1)
@@ -128,9 +163,9 @@ int main()
                     if (len == 0)
                     {
                         printf("Connection closed by web server\n");
-                        exit(EXIT_SUCCESS);
+                        // exit(EXIT_SUCCESS);
+                        break;
                     }
-
                     printf("Received %d bytes from web server\n", len);
 
                     if (send(conn, buffer, len, 0) == -1)
@@ -138,9 +173,9 @@ int main()
                         perror("Error sending to conn");
                         exit(EXIT_FAILURE);
                     }
-
                     printf("Sent %d bytes to server\n", len);
                 }
+                close(webConn);
             }
         }
     }
