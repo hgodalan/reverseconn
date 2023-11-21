@@ -34,7 +34,7 @@ char client_hostname[64];
 
 void cleanup(int sig)
 {
-    syslog(LOG_NOTICE, "Cleaning up...");
+    printf("Cleaning up...\n");
     exit(0);
 }
 
@@ -55,13 +55,13 @@ void set_nonblock(int fd)
     fl = fcntl(fd, F_GETFL, 0);
     if (fl < 0)
     {
-        syslog(LOG_ERR, "fcntl F_GETFL: FD %d: %s", fd, strerror(errno));
+        printf("fcntl F_GETFL: FD %d: %s", fd, strerror(errno));
         exit(1);
     }
     x = fcntl(fd, F_SETFL, fl | O_NONBLOCK);
     if (x < 0)
     {
-        syslog(LOG_ERR, "fcntl F_SETFL: FD %d: %s", fd, strerror(errno));
+        printf("fcntl F_SETFL: FD %d: %s", fd, strerror(errno));
         exit(1);
     }
 }
@@ -88,7 +88,7 @@ int create_server_sock(char *addr, int port)
     x = listen(s, 5);
     if (x < 0)
         err(1, "listen %s:%d", addr, port);
-    syslog(LOG_NOTICE, "listening on %s port %d", addr, port);
+    printf("listening on %s port %d\n", addr, port);
 
     return s;
 }
@@ -149,14 +149,14 @@ int wait_for_connection(int s)
     static struct sockaddr_in peer;
 
     len = sizeof(struct sockaddr);
-    syslog(LOG_INFO, "calling accept FD %d", s);
+    printf("calling accept FD %d\n", s);
     newsock = accept(s, (struct sockaddr *)&peer, &len);
     /* dump_sockaddr (peer, len); */
     if (newsock < 0)
     {
         if (errno != EINTR)
         {
-            syslog(LOG_NOTICE, "accept FD %d: %s", s, strerror(errno));
+            printf("accept FD %d: %s\n", s, strerror(errno));
             return -1;
         }
     }
@@ -200,7 +200,7 @@ void service_client(int cfd, int sfd)
         {
             if (mywrite(sfd, cbuf, &cbo) < 0 && errno != EWOULDBLOCK)
             {
-                syslog(LOG_ERR, "write %d: %s", sfd, strerror(errno));
+                printf("write %d: %s", sfd, strerror(errno));
                 exit(1);
             }
         }
@@ -208,7 +208,7 @@ void service_client(int cfd, int sfd)
         {
             if (mywrite(cfd, sbuf, &sbo) < 0 && errno != EWOULDBLOCK)
             {
-                syslog(LOG_ERR, "write %d: %s", cfd, strerror(errno));
+                printf("write %d: %s", cfd, strerror(errno));
                 exit(1);
             }
         }
@@ -225,7 +225,7 @@ void service_client(int cfd, int sfd)
             if (FD_ISSET(cfd, &R))
             {
                 n = read(cfd, cbuf + cbo, BUF_SIZE - cbo);
-                syslog(LOG_INFO, "read %d bytes from CLIENT (%d)", n, cfd);
+                printf("read %d bytes from CLIENT (%d)\n", n, cfd);
                 if (n > 0)
                 {
                     cbo += n;
@@ -234,14 +234,14 @@ void service_client(int cfd, int sfd)
                 {
                     close(cfd);
                     close(sfd);
-                    syslog(LOG_INFO, "exiting");
+                    printf("exiting\n");
                     _exit(0);
                 }
             }
             if (FD_ISSET(sfd, &R))
             {
                 n = read(sfd, sbuf + sbo, BUF_SIZE - sbo);
-                syslog(LOG_INFO, "read %d bytes from SERVER (%d)", n, sfd);
+                printf("read %d bytes from SERVER (%d)\n", n, sfd);
                 if (n > 0)
                 {
                     sbo += n;
@@ -250,23 +250,23 @@ void service_client(int cfd, int sfd)
                 {
                     close(sfd);
                     close(cfd);
-                    syslog(LOG_INFO, "exiting");
+                    printf("exiting\n");
                     _exit(0);
                 }
             }
         }
         else if (x < 0 && errno != EINTR)
         {
-            syslog(LOG_NOTICE, "select: %s", strerror(errno));
+            printf("select: %s\n", strerror(errno));
             close(sfd);
             close(cfd);
-            syslog(LOG_NOTICE, "exiting");
+            printf("exiting\n");
             _exit(0);
         }
     }
 }
 
-int open_remote_host(char *host, int port)
+int open_nms_connection(char *host, int port)
 {
     int conn = socket(AF_INET, SOCK_STREAM, 0);
     if (conn == -1)
@@ -320,10 +320,12 @@ int main(int argc, char *argv[])
     signal(SIGINT, cleanup);
     signal(SIGCHLD, sigreap);
 
-    client = open_remote_host(nmsaddr, nmssockport);
-
     for (;;)
     {
+        if (client = open_nms_connection(nmsaddr, nmssockport) < 0)
+        {
+            continue;
+        }
         if ((server = open_remote_host(remoteaddr, remoteport)) < 0)
         {
             continue;
@@ -331,8 +333,8 @@ int main(int argc, char *argv[])
         if (0 == fork())
         {
             /* child */
-            syslog(LOG_NOTICE, "connection from %s fd=%d", client_hostname, client);
-            syslog(LOG_INFO, "connected to %s:%d fd=%d", remoteaddr, remoteport, server);
+            printf("connected to %s:%d fd=%d\n", remoteaddr, remoteport, server);
+            printf("connection from %s fd=%d\n", client_hostname, client);
             service_client(client, server);
             abort();
         }
