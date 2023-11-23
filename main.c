@@ -91,14 +91,43 @@ int localWebConn()
     }
 }
 
-void proxyConnection(void *arg)
+void proxyConnection(int src)
 {
     CURL *curl;
     CURLcode res;
-    int src = *(int *)arg;
 
     while (1)
     {
+        fd_set read_fds;
+        FD_ZERO(&read_fds);
+        FD_SET(src, &read_fds);
+
+        struct timeval timeout;
+        timeout.tv_sec = 5;
+        timeout.tv_usec = 0;
+
+        int select_res = select(src + 1, &read_fds, NULL, NULL, &timeout);
+        if (select_res == -1)
+        {
+            perror("select failed");
+            break;
+        }
+        else if (select_res == 0)
+        {
+            // Timeout, no data to read
+            continue;
+        }
+
+        // If we get here, there is data to read on src
+        char buffer[1024];
+        ssize_t len = recv(src, buffer, sizeof(buffer) - 1, 0);
+        if (len == -1)
+        {
+            perror("recv failed");
+            break;
+        }
+        buffer[len] = '\0';
+
         curl = curl_easy_init();
         if (curl)
         {
