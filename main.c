@@ -3,60 +3,130 @@
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <sys/wait.h>
+#include <curl/curl.h>
 
-#define BUFFER_SIZE 1024
+/*
+ *  This is a simple TCP proxy client example written in Golang.
+    *  First, it connects to the TCP server, then it sends the request got from the tunnel.
+    *  After that, it reads the response from the server and sends it to the local service which is a web server.
+    * Finally, it reads the response from the local web server and sends it back to the tunnel.
+    *
 
-void proxyConnection(int dst, int src)
+ func main() {
+    server := "122.147.151.234:27188"
+    conn, err := net.Dial("tcp", server)
+    if err != nil {
+        panic(err)
+    }
+    defer conn.Close()
+
+    fmt.Println("Connected to", server)
+
+    proxyConnection(conn)
+}
+
+func proxyConnection(src net.Conn) {
+    for {
+        dst, err := net.Dial("tcp", "localhost:443")
+        if err != nil {
+            panic(err)
+        }
+        fmt.Println("Connected to localhost:443")
+        // modify request, request usually is http request and won't be too large
+        buffer := make([]byte, 1024)
+        n, err := src.Read(buffer)
+        if err != nil {
+            panic(err)
+        }
+        fmt.Println("read from conn:", n)
+        request, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(buffer)))
+        if err != nil {
+            panic(err)
+        }
+        request.Host = "localhost:443"
+        // Write the modified request to webConn
+        err = request.Write(dst)
+        if err != nil {
+            panic(err)
+        }
+        fmt.Println("write to webConn:\n", request)
+
+        // n64, err := io.Copy(src, dst)
+        // if err != nil {
+        // 	panic(err)
+        // }
+        // fmt.Println("copied", n64, "to src")
+        resp, err := http.ReadResponse(bufio.NewReader(dst), nil)
+        if err != nil {
+            panic(err)
+        }
+        fmt.Println("read from dst:\n", resp)
+        resp.Write(src)
+
+        dst.Close()
+    }
+}
+ */
+
+int localWebConn()
 {
-    // Start remote -> local data transfer
-    pid_t remoteToLocal = fork();
-    if (remoteToLocal == 0)
+    // Dial to device web server
+    int webConn = socket(AF_INET, SOCK_STREAM, 0);
+    if (webConn == -1)
     {
-        char buffer[BUFFER_SIZE];
-        ssize_t bytesRead;
-
-        while ((bytesRead = read(src, buffer, sizeof(buffer))) > 0)
-        {
-            write(dst, buffer, bytesRead);
-        }
-
-        close(src);
-        close(dst);
-        exit(EXIT_SUCCESS);
-    }
-    else if (remoteToLocal == -1)
-    {
-        perror("Error creating remoteToLocal process");
+        perror("Error creating webConn socket");
         exit(EXIT_FAILURE);
     }
 
-    // Start local -> remote data transfer
-    pid_t localToRemote = fork();
-    if (localToRemote == 0)
-    {
-        char buffer[BUFFER_SIZE];
-        ssize_t bytesRead;
+    struct sockaddr_in webServerAddr;
+    memset(&webServerAddr, 0, sizeof(webServerAddr));
+    webServerAddr.sin_family = AF_INET;
+    webServerAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    webServerAddr.sin_port = htons(443);
 
-        while ((bytesRead = read(dst, buffer, sizeof(buffer))) > 0)
-        {
-            write(src, buffer, bytesRead);
-        }
-
-        close(src);
-        close(dst);
-        exit(EXIT_SUCCESS);
-    }
-    else if (localToRemote == -1)
+    if (connect(webConn, (struct sockaddr *)&webServerAddr, sizeof(webServerAddr)) == -1)
     {
-        perror("Error creating localToRemote process");
+        perror("Error connecting to device web server");
         exit(EXIT_FAILURE);
     }
+}
 
-    // Wait for child processes to finish
-    int status;
-    waitpid(remoteToLocal, &status, 0);
-    waitpid(localToRemote, &status, 0);
+void proxyConnection(void *arg)
+{
+    CURL *curl;
+    CURLcode res;
+    int src = *(int *)arg;
+
+    while (1)
+    {
+        curl = curl_easy_init();
+        if (curl)
+        {
+            curl_easy_setopt(curl, CURLOPT_URL, "https://localhost:443");
+            curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+            curl_easy_setopt(curl, CURLOPT_WRITEDATA, &src);
+
+            res = curl_easy_perform(curl);
+            if (res != CURLE_OK)
+                fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+
+            curl_easy_cleanup(curl);
+        }
+    }
+
+    return NULL;
+}
+
+size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp)
+{
+    size_t realsize = size * nmemb;
+    int src = *(int *)userp;
+    char buffer[realsize];
+    printf("write_callback: %d bytes\n", realsize);
+    memcpy(buffer, contents, realsize);
+    write(src, buffer, realsize);
+
+    return realsize;
 }
 
 int main()
@@ -80,33 +150,9 @@ int main()
         exit(EXIT_FAILURE);
     }
 
-    printf("Connected to server\n");
+    printf("Connected to tcp server\n");
 
-    // Dial to device web server
-    int webConn = socket(AF_INET, SOCK_STREAM, 0);
-    if (webConn == -1)
-    {
-        perror("Error creating webConn socket");
-        exit(EXIT_FAILURE);
-    }
-
-    struct sockaddr_in webServerAddr;
-    memset(&webServerAddr, 0, sizeof(webServerAddr));
-    webServerAddr.sin_family = AF_INET;
-    webServerAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
-    webServerAddr.sin_port = htons(443);
-
-    if (connect(webConn, (struct sockaddr *)&webServerAddr, sizeof(webServerAddr)) == -1)
-    {
-        perror("Error connecting to device web server");
-        exit(EXIT_FAILURE);
-    }
-
-    // Continuous proxy handling
-    while (1)
-    {
-        proxyConnection(conn, webConn);
-    }
+    proxyConnection(conn);
 
     return 0;
 }
