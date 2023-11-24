@@ -3,7 +3,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <curl/curl.h>
 
 /*
  *  This is a simple TCP proxy client example written in Golang.
@@ -93,11 +92,9 @@ int localWebConn()
 
 void proxyConnection(int src)
 {
-    CURL *curl;
-    CURLcode res;
-
     while (1)
     {
+        // ready to read from src
         fd_set read_fds;
         FD_ZERO(&read_fds);
         FD_SET(src, &read_fds);
@@ -118,6 +115,13 @@ void proxyConnection(int src)
             continue;
         }
 
+        int webConn = localWebConn();
+        if (webConn == -1)
+        {
+            perror("Error connecting to device web server");
+            continue;
+        }
+
         // If we get here, there is data to read on src
         char buffer[1024];
         ssize_t len = recv(src, buffer, sizeof(buffer) - 1, 0);
@@ -128,19 +132,52 @@ void proxyConnection(int src)
         }
         buffer[len] = '\0';
 
-        curl = curl_easy_init();
-        if (curl)
+        // Modify request Host to localhost:443
+        char *hostHeader = strstr(buffer, "Host:");
+        if (hostHeader)
         {
-            curl_easy_setopt(curl, CURLOPT_URL, "https://localhost:443");
-            curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-            curl_easy_setopt(curl, CURLOPT_WRITEDATA, &src);
-
-            res = curl_easy_perform(curl);
-            if (res != CURLE_OK)
-                fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-
-            curl_easy_cleanup(curl);
+            char *endOfHostHeader = strstr(hostHeader, "\r\n");
+            if (endOfHostHeader)
+            {
+                size_t hostHeaderLength = endOfHostHeader - hostHeader;
+                char newHostHeader[hostHeaderLength + 1];
+                snprintf(newHostHeader, sizeof(newHostHeader), "Host: localhost:443");
+                memcpy(hostHeader, newHostHeader, strlen(newHostHeader));
+            }
         }
+
+        // Send the modified request to the web connection
+        if (send(webConn, buffer, len, 0) == -1)
+        {
+            perror("send failed");
+            break;
+        }
+
+        // Read response from web connection, maybe very large, so we need to read in chunks
+        while (1)
+        {
+            memset(buffer, 0, sizeof(buffer));
+            ssize_t len = recv(webConn, buffer, sizeof(buffer) - 1, 0);
+            if (len == -1)
+            {
+                perror("recv failed");
+                break;
+            }
+            else if (len == 0)
+            {
+                // No more data to read
+                break;
+            }
+
+            // Send response to src
+            if (send(src, buffer, len, 0) == -1)
+            {
+                perror("send failed");
+                break;
+            }
+        }
+
+        close(webConn);
     }
 
     return NULL;
