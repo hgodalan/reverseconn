@@ -1,22 +1,5 @@
 package main
 
-/*
-This is a reverse connection program
-
-Ex:
-Steps
-1. sever listening to 48000 and 48001
-2. client connect to server:48000 and keep connection alive
-3. user connect to server:48001
-4. user send requests, like http://www.example.com
-5. transfer user requests to the tunnel created in 2.
-6. client receive requests from the tunnel and send to 80/443 port
-7. client receive response from 80/443 port and send to the tunnel
-8. server receive response from the tunnel and send to the user
-
-
-*/
-
 import (
 	"bufio"
 	"bytes"
@@ -27,43 +10,6 @@ import (
 	"net/http"
 	"time"
 )
-
-var FrontendWeb = "localhost:9000"
-var EHG7508Web = "192.168.12.109:443"
-var CWRWeb = "192.168.1.1:443"
-
-// ClientConnections map[port]net.Conn, server local port:conn
-var ClientConnections map[int]net.Conn
-
-func init() {
-	ClientConnections = make(map[int]net.Conn)
-}
-
-// SocketServer listen to 48000 and keep connection alive
-// Usually, this is a server program with Our program
-func SocketServer() {
-	serverIP := "0.0.0.0"
-	serverPort := 48000
-
-	//  tcp server
-	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", serverIP, serverPort))
-	if err != nil {
-		panic(err)
-	}
-	defer listener.Close()
-
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			fmt.Println("Error accepting connection:", err)
-			continue
-		}
-		fmt.Printf("Port %d: Accepted connection from %s\n", serverPort, conn.RemoteAddr().String())
-
-		// add the connection to the map , certain port we provide:conn
-		ClientConnections[48001] = conn
-	}
-}
 
 func proxyTest1(src net.Conn) {
 	for {
@@ -214,32 +160,7 @@ func proxyConnection(dst net.Conn, src net.Conn) {
 	<-chDone
 }
 
-func TcpServer() {
-	listerner, err := net.Listen("tcp", ":48001")
-	if err != nil {
-		panic(err)
-	}
-	defer listerner.Close()
-
-	for {
-		userConn, err := listerner.Accept()
-		if err != nil {
-			panic(err)
-		}
-
-		clientConn, exists := ClientConnections[48001]
-		if !exists {
-			fmt.Printf("Client %s is not connected\n", userConn.RemoteAddr().String())
-			continue
-		}
-		proxyConnection(clientConn, userConn)
-		userConn.Close()
-	}
-}
-
-func test4() {
-	server := "122.147.151.234:27188"
-
+func test4(server, proxyTo string) {
 	cert, err := tls.LoadX509KeyPair("cert.pem", "key.pem")
 	if err != nil {
 		fmt.Println("Error loading certificate:", err)
@@ -259,11 +180,11 @@ func test4() {
 	}
 	fmt.Println("Connected to", server)
 
-	localWeb, err := tls.Dial("tcp", CWRWeb, tlsConfig)
+	localWeb, err := tls.Dial("tcp", proxyTo, tlsConfig)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("Connected to", CWRWeb)
+	fmt.Println("Connected to", proxyTo)
 	defer localWeb.Close()
 
 	for {
@@ -352,9 +273,4 @@ func test3() {
 	SocketClient()
 
 	// go TcpServer()
-}
-
-func ReverseConn() {
-	// test3()
-	test4()
 }
